@@ -87,16 +87,15 @@ describe IO::Buffer do
 			expect(buffer.get_value(:u32, 0)).to be == 42
 		end
 		
-		it "supports big-endian variants" do
-			# Atomic operations work on raw memory bytes
-			# When using :U32 (big-endian), the atomic operation still works on raw bytes
-			buffer.set_value(:U32, 0, 0)
-			result = buffer.atomic_increment(:U32, 0, 10)
-			# The result is the new value interpreted as big-endian
-			expect(result).to be_a(Integer)
-			# Read back with same endianness to verify
-			read_value = buffer.get_value(:U32, 0)
-			expect(read_value).to be_a(Integer)
+		it "works on raw bytes in host endian (both :u32 and :U32 are equivalent)" do
+			# atomic_load and atomic_store work on raw bytes in host endian
+			# Both :u32 and :U32 map to the same atomic operation
+			buffer.atomic_store(:u32, 0, 0x12345678)
+			result = buffer.atomic_load(:u32, 0)
+			expect(result).to be == 0x12345678
+			# U32 also works (maps to same implementation)
+			result_be = buffer.atomic_load(:U32, 0)
+			expect(result_be).to be == 0x12345678
 		end
 		
 		it "handles zero increment" do
@@ -264,40 +263,142 @@ describe IO::Buffer do
 		end
 	end
 	
+	with "#atomic_load" do
+		it "can atomically read u32 value" do
+			buffer.set_value(:u32, 0, 42)
+			result = buffer.atomic_load(:u32, 0)
+			expect(result).to be == 42
+		end
+		
+		it "can atomically read u64 value" do
+			buffer.set_value(:u64, 0, 1000)
+			result = buffer.atomic_load(:u64, 0)
+			expect(result).to be == 1000
+		end
+		
+		it "can atomically read s32 value" do
+			buffer.set_value(:s32, 0, -100)
+			result = buffer.atomic_load(:s32, 0)
+			expect(result).to be == -100
+		end
+		
+		it "can atomically read U8 value" do
+			buffer.set_value(:U8, 0, 255)
+			result = buffer.atomic_load(:U8, 0)
+			expect(result).to be == 255
+		end
+		
+		it "reads consistent values during concurrent modifications" do
+			buffer.set_value(:u32, 0, 0)
+			
+			read_values = []
+			writer = Thread.new do
+				100.times do |i|
+					buffer.atomic_increment(:u32, 0, 1)
+				end
+			end
+			
+			reader = Thread.new do
+				100.times do
+					read_values << buffer.atomic_load(:u32, 0)
+				end
+			end
+			
+			writer.join
+			reader.join
+			
+			# All reads should be valid integers (no torn reads)
+			expect(read_values.all?{|v| v.is_a?(Integer)}).to be == true
+			# Final value should be 100
+			expect(buffer.atomic_load(:u32, 0)).to be == 100
+		end
+	end
+	
+	with "#atomic_store" do
+		it "can atomically write u32 value" do
+			buffer.atomic_store(:u32, 0, 42)
+			result = buffer.atomic_load(:u32, 0)
+			expect(result).to be == 42
+		end
+		
+		it "can atomically write u64 value" do
+			buffer.atomic_store(:u64, 0, 1000)
+			result = buffer.atomic_load(:u64, 0)
+			expect(result).to be == 1000
+		end
+		
+		it "can atomically write s32 value" do
+			buffer.atomic_store(:s32, 0, -100)
+			result = buffer.atomic_load(:s32, 0)
+			expect(result).to be == -100
+		end
+		
+		it "can atomically write U8 value" do
+			buffer.atomic_store(:U8, 0, 255)
+			result = buffer.atomic_load(:U8, 0)
+			expect(result).to be == 255
+		end
+		
+		it "writes are visible to concurrent readers" do
+			buffer.set_value(:u32, 0, 0)
+			
+			read_values = []
+			writer = Thread.new do
+				100.times do |i|
+					buffer.atomic_store(:u32, 0, i + 1)
+				end
+			end
+			
+			reader = Thread.new do
+				100.times do
+					read_values << buffer.atomic_load(:u32, 0)
+				end
+			end
+			
+			writer.join
+			reader.join
+			
+			# All reads should be valid integers (no torn reads)
+			expect(read_values.all?{|v| v.is_a?(Integer)}).to be == true
+			# Final value should be 100
+			expect(buffer.atomic_load(:u32, 0)).to be == 100
+		end
+	end
+	
 	with "#atomic_compare_and_swap" do
 		it "can swap when value matches u32" do
-			buffer.set_value(:u32, 0, 10)
+			buffer.atomic_store(:u32, 0, 10)
 			result = buffer.atomic_compare_and_swap(:u32, 0, 10, 20)
 			expect(result).to be == true
-			expect(buffer.get_value(:u32, 0)).to be == 20
+			expect(buffer.atomic_load(:u32, 0)).to be == 20
 		end
 		
 		it "does not swap when value does not match" do
-			buffer.set_value(:u32, 0, 10)
+			buffer.atomic_store(:u32, 0, 10)
 			result = buffer.atomic_compare_and_swap(:u32, 0, 5, 20)
 			expect(result).to be == false
-			expect(buffer.get_value(:u32, 0)).to be == 10
+			expect(buffer.atomic_load(:u32, 0)).to be == 10
 		end
 		
 		it "can swap u64 values" do
-			buffer.set_value(:u64, 0, 1000)
+			buffer.atomic_store(:u64, 0, 1000)
 			result = buffer.atomic_compare_and_swap(:u64, 0, 1000, 2000)
 			expect(result).to be == true
-			expect(buffer.get_value(:u64, 0)).to be == 2000
+			expect(buffer.atomic_load(:u64, 0)).to be == 2000
 		end
 		
 		it "can swap s32 values" do
-			buffer.set_value(:s32, 0, -100)
+			buffer.atomic_store(:s32, 0, -100)
 			result = buffer.atomic_compare_and_swap(:s32, 0, -100, -200)
 			expect(result).to be == true
-			expect(buffer.get_value(:s32, 0)).to be == -200
+			expect(buffer.atomic_load(:s32, 0)).to be == -200
 		end
 		
 		it "can swap U8 values" do
-			buffer.set_value(:U8, 0, 42)
+			buffer.atomic_store(:U8, 0, 42)
 			result = buffer.atomic_compare_and_swap(:U8, 0, 42, 84)
 			expect(result).to be == true
-			expect(buffer.get_value(:U8, 0)).to be == 84
+			expect(buffer.atomic_load(:U8, 0)).to be == 84
 		end
 	end
 	
@@ -384,12 +485,12 @@ describe IO::Buffer do
 		end
 		
 		it "can perform concurrent compare and swap" do
-			buffer.set_value(:u32, 0, 0)
+			buffer.atomic_store(:u32, 0, 0)
 			
 			threads = 100.times.map do
 				Thread.new do
 					loop do
-						current = buffer.get_value(:u32, 0)
+						current = buffer.atomic_load(:u32, 0)
 						if buffer.atomic_compare_and_swap(:u32, 0, current, current + 1)
 							break
 						end
@@ -399,7 +500,7 @@ describe IO::Buffer do
 			
 			threads.each(&:join)
 			
-			expect(buffer.get_value(:u32, 0)).to be == 100
+			expect(buffer.atomic_load(:u32, 0)).to be == 100
 		end
 	end
 end

@@ -81,6 +81,23 @@ static ID RB_IO_BUFFER_DATA_TYPE_S64;
 		return val2num(result); \
 	}
 
+// Macro for atomic load (works on raw bytes in host endian)
+#define ATOMIC_LOAD_IMPL(name, ctype, atomic_type, size, num2val, val2num) \
+	static VALUE atomic_load_##name(VALUE self, size_t offset) { \
+		void *pointer = get_buffer_pointer(self, offset, size); \
+		ctype result = atomic_load((atomic_type*)pointer); \
+		return val2num(result); \
+	}
+
+// Macro for atomic store (works on raw bytes in host endian)
+#define ATOMIC_STORE_IMPL(name, ctype, atomic_type, size, num2val, val2num) \
+	static VALUE atomic_store_##name(VALUE self, size_t offset, VALUE value) { \
+		void *pointer = get_buffer_pointer(self, offset, size); \
+		ctype converted_value = (ctype)num2val(value); \
+		atomic_store((atomic_type*)pointer, converted_value); \
+		return self; \
+	}
+
 // Macro for atomic compare and swap
 #define ATOMIC_CAS_IMPL(name, ctype, atomic_type, size, num2val, val2num) \
 	static int atomic_cas_##name(VALUE self, size_t offset, VALUE expected_value, VALUE desired_value) { \
@@ -127,6 +144,25 @@ ATOMIC_BITWISE_IMPL(u32, uint32_t, atomic_uint_least32_t, 4, NUM2UINT, UINT2NUM,
 ATOMIC_BITWISE_IMPL(i32, int32_t, atomic_int_least32_t, 4, NUM2INT, INT2NUM, xor)
 ATOMIC_BITWISE_IMPL(u64, uint64_t, atomic_uint_least64_t, 8, NUM2ULL, ULL2NUM, xor)
 ATOMIC_BITWISE_IMPL(i64, int64_t, atomic_int_least64_t, 8, NUM2LL, LL2NUM, xor)
+
+// Atomic load/store work on raw bytes in host endian (both :u32 and :U32 map to same implementation)
+ATOMIC_LOAD_IMPL(u8, uint8_t, atomic_uint_least8_t, 1, NUM2UINT, UINT2NUM)
+ATOMIC_LOAD_IMPL(s8, int8_t, atomic_int_least8_t, 1, NUM2INT, INT2NUM)
+ATOMIC_LOAD_IMPL(u16, uint16_t, atomic_uint_least16_t, 2, NUM2UINT, UINT2NUM)
+ATOMIC_LOAD_IMPL(s16, int16_t, atomic_int_least16_t, 2, NUM2INT, INT2NUM)
+ATOMIC_LOAD_IMPL(u32, uint32_t, atomic_uint_least32_t, 4, NUM2UINT, UINT2NUM)
+ATOMIC_LOAD_IMPL(s32, int32_t, atomic_int_least32_t, 4, NUM2INT, INT2NUM)
+ATOMIC_LOAD_IMPL(u64, uint64_t, atomic_uint_least64_t, 8, NUM2ULL, ULL2NUM)
+ATOMIC_LOAD_IMPL(s64, int64_t, atomic_int_least64_t, 8, NUM2LL, LL2NUM)
+
+ATOMIC_STORE_IMPL(u8, uint8_t, atomic_uint_least8_t, 1, NUM2UINT, UINT2NUM)
+ATOMIC_STORE_IMPL(s8, int8_t, atomic_int_least8_t, 1, NUM2INT, INT2NUM)
+ATOMIC_STORE_IMPL(u16, uint16_t, atomic_uint_least16_t, 2, NUM2UINT, UINT2NUM)
+ATOMIC_STORE_IMPL(s16, int16_t, atomic_int_least16_t, 2, NUM2INT, INT2NUM)
+ATOMIC_STORE_IMPL(u32, uint32_t, atomic_uint_least32_t, 4, NUM2UINT, UINT2NUM)
+ATOMIC_STORE_IMPL(s32, int32_t, atomic_int_least32_t, 4, NUM2INT, INT2NUM)
+ATOMIC_STORE_IMPL(u64, uint64_t, atomic_uint_least64_t, 8, NUM2ULL, ULL2NUM)
+ATOMIC_STORE_IMPL(s64, int64_t, atomic_int_least64_t, 8, NUM2LL, LL2NUM)
 
 ATOMIC_CAS_IMPL(u8, uint8_t, atomic_uint_least8_t, 1, NUM2UINT, UINT2NUM)
 ATOMIC_CAS_IMPL(i8, int8_t, atomic_int_least8_t, 1, NUM2INT, INT2NUM)
@@ -242,6 +278,60 @@ static VALUE atomic_xor_impl(VALUE self, ID type_identifier, size_t offset, long
 	return Qnil;
 }
 
+static VALUE atomic_load_impl(VALUE self, ID type_identifier, size_t offset) {
+#define ATOMIC_LOAD_CASE(name, impl_name) \
+	if (type_identifier == RB_IO_BUFFER_DATA_TYPE_##name) { \
+		return atomic_load_##impl_name(self, offset); \
+	}
+	
+	// Support both uppercase and lowercase (they map to same implementation - atomic ops work on raw bytes)
+	ATOMIC_LOAD_CASE(U8, u8)
+	ATOMIC_LOAD_CASE(S8, s8)
+	ATOMIC_LOAD_CASE(u16, u16)
+	ATOMIC_LOAD_CASE(s16, s16)
+	ATOMIC_LOAD_CASE(U16, u16)
+	ATOMIC_LOAD_CASE(S16, s16)
+	ATOMIC_LOAD_CASE(u32, u32)
+	ATOMIC_LOAD_CASE(s32, s32)
+	ATOMIC_LOAD_CASE(U32, u32)
+	ATOMIC_LOAD_CASE(S32, s32)
+	ATOMIC_LOAD_CASE(u64, u64)
+	ATOMIC_LOAD_CASE(s64, s64)
+	ATOMIC_LOAD_CASE(U64, u64)
+	ATOMIC_LOAD_CASE(S64, s64)
+#undef ATOMIC_LOAD_CASE
+	
+	rb_raise(rb_eArgError, "Unsupported type for atomic operations: %"PRIsVALUE, rb_id2str(type_identifier));
+	return Qnil;
+}
+
+static VALUE atomic_store_impl(VALUE self, ID type_identifier, size_t offset, VALUE value) {
+#define ATOMIC_STORE_CASE(name, impl_name) \
+	if (type_identifier == RB_IO_BUFFER_DATA_TYPE_##name) { \
+		return atomic_store_##impl_name(self, offset, value); \
+	}
+	
+	// Support both uppercase and lowercase (they map to same implementation - atomic ops work on raw bytes)
+	ATOMIC_STORE_CASE(U8, u8)
+	ATOMIC_STORE_CASE(S8, s8)
+	ATOMIC_STORE_CASE(u16, u16)
+	ATOMIC_STORE_CASE(s16, s16)
+	ATOMIC_STORE_CASE(U16, u16)
+	ATOMIC_STORE_CASE(S16, s16)
+	ATOMIC_STORE_CASE(u32, u32)
+	ATOMIC_STORE_CASE(s32, s32)
+	ATOMIC_STORE_CASE(U32, u32)
+	ATOMIC_STORE_CASE(S32, s32)
+	ATOMIC_STORE_CASE(u64, u64)
+	ATOMIC_STORE_CASE(s64, s64)
+	ATOMIC_STORE_CASE(U64, u64)
+	ATOMIC_STORE_CASE(S64, s64)
+#undef ATOMIC_STORE_CASE
+	
+	rb_raise(rb_eArgError, "Unsupported type for atomic operations: %"PRIsVALUE, rb_id2str(type_identifier));
+	return Qnil;
+}
+
 static VALUE atomic_compare_and_swap_impl(VALUE self, ID type_identifier, size_t offset, VALUE expected_value, VALUE desired_value) {
 #define ATOMIC_CAS_CASE(name, impl_name) \
 	if (type_identifier == RB_IO_BUFFER_DATA_TYPE_##name) { \
@@ -347,6 +437,20 @@ static VALUE atomic_xor(VALUE self, VALUE type_symbol, VALUE offset_value, VALUE
 	return atomic_xor_impl(self, type_identifier, offset, value);
 }
 
+static VALUE atomic_load_method(VALUE self, VALUE type_symbol, VALUE offset_value) {
+	ID type_identifier = get_type_id(type_symbol);
+	size_t offset = NUM2SIZET(offset_value);
+	
+	return atomic_load_impl(self, type_identifier, offset);
+}
+
+static VALUE atomic_store_method(VALUE self, VALUE type_symbol, VALUE offset_value, VALUE value) {
+	ID type_identifier = get_type_id(type_symbol);
+	size_t offset = NUM2SIZET(offset_value);
+	
+	return atomic_store_impl(self, type_identifier, offset, value);
+}
+
 static VALUE atomic_compare_and_swap(VALUE self, VALUE type_symbol, VALUE offset_value, VALUE expected_value, VALUE desired_value) {
 	ID type_identifier = get_type_id(type_symbol);
 	size_t offset = NUM2SIZET(offset_value);
@@ -371,7 +475,7 @@ void Init_IO_Buffer_Atomic(void) {
 	
 	VALUE IO_Buffer = rb_const_get(rb_cIO, rb_intern("Buffer"));
 	
-	// Initialize type IDs (matching Ruby's pattern)
+	// Initialize type IDs (support both forms for compatibility, but atomic operations work on raw bytes in host endian)
 #define IO_BUFFER_DEFINE_DATA_TYPE(name) RB_IO_BUFFER_DATA_TYPE_##name = rb_intern_const(#name)
 	IO_BUFFER_DEFINE_DATA_TYPE(U8);
 	IO_BUFFER_DEFINE_DATA_TYPE(S8);
@@ -396,5 +500,7 @@ void Init_IO_Buffer_Atomic(void) {
 	DEFINE_METHOD_IF_NOT_EXISTS(IO_Buffer, "atomic_and", atomic_and, 3);
 	DEFINE_METHOD_IF_NOT_EXISTS(IO_Buffer, "atomic_or", atomic_or, 3);
 	DEFINE_METHOD_IF_NOT_EXISTS(IO_Buffer, "atomic_xor", atomic_xor, 3);
+	DEFINE_METHOD_IF_NOT_EXISTS(IO_Buffer, "atomic_load", atomic_load_method, 2);
+	DEFINE_METHOD_IF_NOT_EXISTS(IO_Buffer, "atomic_store", atomic_store_method, 3);
 	DEFINE_METHOD_IF_NOT_EXISTS(IO_Buffer, "atomic_compare_and_swap", atomic_compare_and_swap, 4);
 }
