@@ -20,7 +20,7 @@ Please see the [project documentation](https://socketry.github.io/io-buffer-atom
 
 Please see the [project releases](https://socketry.github.io/io-buffer-atomic/releases/index) for all releases.
 
-### Unreleased
+### v0.1.0
 
 ## Contributing
 
