@@ -1,0 +1,13 @@
+# Automatically generated context index for Utopia::Project guides.
+# Do not edit then files in this directory directly, instead edit the guides and then run `bake utopia:project:agent:context:update`.
+---
+description: Atomic operations for IO::Buffer instances.
+metadata:
+  documentation_uri: https://socketry.github.io/io-buffer-atomic/
+  funding_uri: https://github.com/sponsors/ioquatix
+  source_code_uri: https://github.com/socketry/io-buffer-atomic.git
+files:
+- path: getting-started.md
+  title: Getting Started
+  description: This guide explains how to use `io-buffer-atomic` for atomic operations
+    on `IO::Buffer` instances.
